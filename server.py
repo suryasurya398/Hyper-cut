@@ -42,19 +42,25 @@ def export_clip(req: ClipRequest):
                 pass
 
     try:
-        # 1. Download exact clip section using yt-dlp --download-sections
+        # Ensure yt-dlp is latest to avoid YouTube 403 blocks
+        subprocess.run(["pip", "install", "--upgrade", "yt-dlp"], capture_output=True, timeout=30)
+
+        # 1. Download exact clip section using android client bypass
         section_spec = f"*{req.start_seconds}-{req.end_seconds}"
         dl_cmd = [
             "yt-dlp",
+            "--extractor-args", "youtube:player_client=android,web",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / b",
             "--download-sections", section_spec,
             "-o", input_file,
             req.youtube_url
         ]
         
-        result = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=150)
+        result = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=180)
         if result.returncode != 0 or not os.path.exists(input_file):
-            raise HTTPException(status_code=400, detail=f"yt-dlp download failed: {result.stderr[-300:]}")
+            err_msg = result.stderr[-400:] if result.stderr else "Unknown yt-dlp error"
+            raise HTTPException(status_code=400, detail=f"yt-dlp download failed: {err_msg}")
 
         # 2. Determine video resolution based on aspect ratio
         if req.aspect_ratio == "9:16":
@@ -81,7 +87,8 @@ def export_clip(req: ClipRequest):
         
         ff_result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=120)
         if ff_result.returncode != 0 or not os.path.exists(output_filename):
-            raise HTTPException(status_code=500, detail=f"FFmpeg processing failed: {ff_result.stderr[-300:]}")
+            err_msg = ff_result.stderr[-300:] if ff_result.stderr else "FFmpeg error"
+            raise HTTPException(status_code=500, detail=f"FFmpeg processing failed: {err_msg}")
 
         return FileResponse(
             output_filename,
